@@ -35,7 +35,7 @@ const QUESTION = {
     'Trivial: a quick question, a lookup, or a one-line edit',
     'Small: a focused change in one or two files',
     'Moderate: a feature or bug fix across several files, a non-obvious bug, or running a multi-step workflow such as a code review',
-    'Hard: a cross-cutting refactor, tricky concurrency/security/performance work, or debugging with little to go on',
+    'Hard: a cross-cutting refactor, tricky concurrency/security/performance work, debugging with little to go on, or a fix the user says still does not work',
     'Very hard: architecture or algorithm design where a wrong call is expensive',
   ],
 }
