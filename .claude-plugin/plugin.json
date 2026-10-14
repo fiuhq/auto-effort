@@ -8,6 +8,12 @@
   "description": "Picks /effort per prompt: Jev (TypeSafe AI) grades how hard the task is, and the turn runs at that level.",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Turn auto-effort on",
+      "description": "On (default): every session starts with Jev picking the effort. Off: sessions start with your own effort, and the band's button or /auto-effort on turns Jev on for that session.",
+      "default": true
+    },
     "raise": {
       "type": "boolean",
       "title": "Let Jev raise effort",

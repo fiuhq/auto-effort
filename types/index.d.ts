@@ -10,7 +10,8 @@ declare module 'claude-code' {
   interface PluginState {
     'auto-effort': {
       judgement: Judgement | null
-      isOff: boolean
+      /** Switched this session with the band or `/auto-effort on|off`; null defers to the `enabled` setting. */
+      isOff: boolean | null
       previous: string | null
       /** The session's own effort, as the last main-thread request carried it before any rewrite. */
       sessionEffort: Effort | number | null

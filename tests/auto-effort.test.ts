@@ -17,6 +17,7 @@ async function setup($: any, on: any) {
     bodies: [] as any[],
     heads: 0, // warm-up HEADs that kept the connection to Jev open
     log: '',
+    files: {} as Record<string, string>, // other files the mod reads, by path
     otherSession: undefined as (() => Promise<void>) | undefined,
     sent: [] as unknown[],
     step: async (agentId?: string) => {
@@ -34,7 +35,11 @@ async function setup($: any, on: any) {
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   mock.env(on, { TYPESAFE_API_KEY: 'test-key', HOME: '/home/me' })
-  on('fs.read', () => ({ value: s.log }))
+  on('fs.read', (_: any, e: any) => {
+    if (e.path.endsWith('decisions.jsonl')) return { value: s.log }
+    if (e.path in s.files) return { value: s.files[e.path] }
+    throw new Error(`ENOENT: ${e.path}`)
+  })
   on('fs.write', (_: any, e: any) => { s.log = e.text; return { value: undefined } })
   on('fs.exists', () => ({ value: true }))
   on('fs.stat', () => ({ value: { kind: 'file', size: s.log.length, mtimeMs: 0, isLink: false } }))
@@ -59,7 +64,8 @@ async function setup($: any, on: any) {
   return Object.assign(s, { band })
 }
 
-const canRaise = { options: { raise: true } } // these tests raise above the session's medium
+const enabled = { options: { enabled: true } } // these tests start with the mod on
+const canRaise = { options: { enabled: true, raise: true } } // these tests raise above the session's medium
 
 test('Jev picks the main thread effort and the band shows it; failures, subagents and slash commands are left alone', canRaise, async ($, on) => {
   const s = await setup($, on)
@@ -199,7 +205,7 @@ test('a long task: mid-turn messages only raise a running pick, and nothing stal
   expect(entries.find(x => x.prompt === 'redesign the schema')).toMatchObject({ midTurn: false, queued: true, applies: 'at its own turn' })
 })
 
-test('/auto-effort reports each turn from the mod\'s own log: what Jev picked and what the requests ran at', async ($, on) => {
+test('/auto-effort reports each turn from the mod\'s own log: what Jev picked and what the requests ran at', enabled, async ($, on) => {
   const s = await setup($, on)
   const run = async () => ((await $.command.run({ command: 'auto-effort', args: '', origin: typed } as any)) as any).text as string
 
@@ -216,7 +222,7 @@ test('/auto-effort reports each turn from the mod\'s own log: what Jev picked an
   expect(text).toMatch(/^low\s+medium\s+2\s+42\s+low 0\.20 \(80%\)\s+what is 2\+2$/m)
 })
 
-test('/auto-effort off stops asking Jev and /auto-effort on resumes', async ($, on) => {
+test('/auto-effort off stops asking Jev and /auto-effort on resumes', enabled, async ($, on) => {
   const s = await setup($, on)
   const run = async (args: string) => ((await $.command.run({ command: 'auto-effort', args, origin: typed } as any)) as any).text as string
 
@@ -229,7 +235,7 @@ test('/auto-effort off stops asking Jev and /auto-effort on resumes', async ($, 
   expect(s.bodies.length).toBe(1)
 })
 
-test('sessions logging at once keep each other\'s lines', async ($, on) => {
+test('sessions logging at once keep each other\'s lines', enabled, async ($, on) => {
   const s = await setup($, on)
   s.otherSession = async () => { s.log += '{"kind":"decision","prompt":"from another session"}\n' }
   await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any)
@@ -237,7 +243,7 @@ test('sessions logging at once keep each other\'s lines', async ($, on) => {
   expect(prompts).toEqual(['from another session', 'refactor the parser'])
 })
 
-test('by default Jev only lowers: a pick above the session effort is capped there, and the band says so', async ($, on) => {
+test('by default Jev only lowers: a pick above the session effort is capped there, and the band says so', enabled, async ($, on) => {
   const s = await setup($, on)
   await s.step() // a request shows the session's effort (medium)
 
@@ -255,7 +261,7 @@ test('by default Jev only lowers: a pick above the session effort is capped ther
   expect(s.sent.at(-1)).toBe('low')
 })
 
-test('a short approval is judged with the end of the last reply: what it approves', async ($, on) => {
+test('a short approval is judged with the end of the last reply: what it approves', enabled, async ($, on) => {
   const s = await setup($, on)
   await $.prompt.submit({ origin: typed, text: 'do next' } as any)
   await $.turn.complete({ turnId: 't', reason: 'answer', isAborted: false, durationMs: 1, answer: 'x'.repeat(5000) + ' Should I add the cap and commit it?' } as any)
@@ -264,10 +270,22 @@ test('a short approval is judged with the end of the last reply: what it approve
   const state = s.bodies.at(-1).state
   expect(state).toMatchObject({ previous_request: 'do next', request: 'yes, fix' })
   expect(state.last_reply.endsWith('Should I add the cap and commit it?')).toBe(true)
-  expect(state.last_reply.length).toBe(1500)
+  expect(state.last_reply.length).toBe(3000)
 })
 
-test('the connection to Jev is kept warm while the session is in use, and left to close once idle', async ($, on) => {
+test('a prompt that hands over a brief file is judged with the start of that brief', enabled, async ($, on) => {
+  const s = await setup($, on)
+  s.files['/home/me/work/.scratch/brief.md'] = '# Shard the payments DB\n' + 'y'.repeat(9000)
+  await $.prompt.submit({ origin: typed, text: 'Read ~/work/.scratch/brief.md and implement it' } as any)
+  const state = s.bodies.at(-1).state
+  expect(state.brief.startsWith('# Shard the payments DB')).toBe(true)
+  expect(state.brief.length).toBe(6000)
+  await $.prompt.submit({ origin: typed, text: 'Read /nope/missing.md and do it' } as any) // unreadable: judged on the prompt alone
+  await $.prompt.submit({ origin: typed, text: 'fix the typo in greet.py' } as any)
+  expect(s.bodies.slice(-2).map(b => b.state.brief)).toEqual([null, null])
+})
+
+test('the connection to Jev is kept warm while the session is in use, and left to close once idle', enabled, async ($, on) => {
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'auto-effort' } }))
   const s = await setup($, on)
@@ -284,4 +302,36 @@ test('the connection to Jev is kept warm while the session is in use, and left t
   await s.clock.advance(60_000)
   expect(s.heads).toBe(idle + 1)
   expect(s.bodies.length).toBe(1) // the warm-ups never asked Jev anything
+})
+
+test('on by default; with `enabled` off, Jev isn\'t asked until it is turned on for the session', { options: { enabled: false } }, async ($, on) => {
+  const s = await setup($, on)
+  await s.shows(/off, session effort applies/)
+  await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any)
+  await s.step()
+  expect(s.bodies.length).toBe(0)
+  expect(s.sent.at(-1)).toBe('medium')
+
+  await s.band.press({ key: 'toggle' })
+  await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any)
+  expect(s.bodies.length).toBe(1)
+})
+
+test('/auto-effort default on|off saves the enabled setting and switches this session', async ($, on) => {
+  const saved: unknown[] = []
+  on('config.set', (_: any, e: any) => { saved.push([e.key, e.value]); return { value: e.value } })
+  const s = await setup($, on)
+  const run = async (args: string) => ((await $.command.run({ command: 'auto-effort', args, origin: typed } as any)) as any).text as string
+
+  await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any) // no setting: on
+  expect(s.bodies.length).toBe(1)
+
+  expect(await run(' default  off ')).toMatch(/^off by default/)
+  await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any)
+  expect(s.bodies.length).toBe(1)
+
+  expect(await run('default on')).toMatch(/^on by default/)
+  await $.prompt.submit({ origin: typed, text: 'refactor the parser' } as any)
+  expect(s.bodies.length).toBe(2)
+  expect(saved).toEqual([['auto-effort.enabled', false], ['auto-effort.enabled', true]])
 })

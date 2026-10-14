@@ -23,18 +23,19 @@ Without a key, or when Jev fails or takes over 3s, your own `/effort` applies.
 ## Use
 
 - **The band above the prompt** shows the level in use, whether the request was actually sent at it (`✓ sent`), Jev's confidence, and a **Turn off / Turn on** button.
-- **`/auto-effort`** prints the last turns: what Jev picked, what each turn's requests ran at, and how many turns were lowered or raised from your session's effort. `/auto-effort off` and `/auto-effort on` switch it, like the band's button.
+- **`/auto-effort`** prints the last turns: what Jev picked, what each turn's requests ran at, and how many turns were lowered or raised from your session's effort. `/auto-effort off` and `/auto-effort on` switch it for this session, like the band's button. `/auto-effort default on` and `/auto-effort default off` also save that as the `enabled` setting, so new sessions start the same way.
 - **`~/.claude/auto-effort/decisions.jsonl`** keeps one JSON line per judged prompt and per turn.
 
 ## Settings
 
+- **`enabled`** (default on): start every session with Jev picking the effort. Off, sessions start at your own effort and the band's **Turn on** button or `/auto-effort on` switches it on for that session. Set it in `/config`, or in settings under `pluginConfigs.auto-effort.enabled`.
 - **`raise`** (default off): let Jev raise effort above your session setting for hard tasks. Off, a higher pick is capped at your setting and the band shows `(Jev: xhigh, capped)`. Set it in `/config`, or in settings under `pluginConfigs.auto-effort.raise`.
 
 In the benchmark below, on the tasks Jev lowered from `high`, thinking fell by about half (1,164 to 502 tokens a run) and every run still passed. Those were small tasks, so the bill barely moved. Raising from `medium` cost 4-15% more and changed no outcomes. So it's off by default.
 
 ## How it decides
 
-- Each prompt you write is sent to Jev as one Score question, with your previous prompt and the end of the last reply as context, so "yes, fix" is judged against what it approves.
+- Each prompt you write is sent to Jev as one Score question, with your previous prompt and the end of the last reply as context, so "yes, fix" is judged against what it approves. A prompt that names a `.md` or `.txt` file ("Read ~/notes/brief.md and implement it") also sends the start of that file, so the work it hands over is judged rather than the one-line prompt.
 - Only the main conversation is changed. Subagents, slash-command turns and models without an effort setting keep your own effort.
 - A message sent while a task runs can only raise its effort (up to your setting, unless `raise` is on). A prompt queued with ctrl+x enter is judged for its own turn.
 - Messages you didn't write (subagent reports, notifications) aren't judged.
