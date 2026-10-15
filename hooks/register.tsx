@@ -10,7 +10,7 @@ const LOG_TRIM_BYTES = 2_000_000 // under fs.read's 4 MiB cap
 const REPORT_TURNS = 12
 // A turn still at low/medium after this many model requests is bigger than its prompt looked:
 // Jev is asked once more with what the agent has found, and may only raise the effort.
-const RECHECK_AT = 8
+const RECHECK_AT = 4
 const PROGRESS_CHARS = 6000
 // A fresh TLS connection to Jev costs ~550ms on top of its ~250ms answer, and an idle one is dropped within a few
 // minutes. So while the session is in use, an unauthenticated HEAD (a free 405) keeps the host's connection open.

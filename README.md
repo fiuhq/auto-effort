@@ -37,7 +37,7 @@ In the benchmark below, on the tasks Jev lowered from `high`, thinking fell by a
 
 - Each prompt you write is sent to Jev as one Score question, with your previous prompt and the end of the last reply as context, so "yes, fix" is judged against what it approves. A prompt that names a `.md` or `.txt` file ("Read ~/notes/brief.md and implement it") also sends the start of that file, so the work it hands over is judged rather than the one-line prompt.
 - Only the main conversation is changed. Subagents, slash-command turns and models without an effort setting keep your own effort.
-- A turn still at `low` or `medium` after 8 model requests is bigger than its prompt looked: Jev is asked once more with what the agent has found so far, and may raise the effort for the rest of the turn (never lower it).
+- A turn still at `low` or `medium` after 4 model requests is bigger than its prompt looked: Jev is asked once more with what the agent has found so far, and may raise the effort for the rest of the turn (never lower it).
 - A message sent while a task runs can only raise its effort (up to your setting, unless `raise` is on). A prompt queued with ctrl+x enter is judged for its own turn.
 - Messages you didn't write (subagent reports, notifications) aren't judged.
 
