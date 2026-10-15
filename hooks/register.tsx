@@ -31,12 +31,12 @@ const lastReply = atom({ plugin: 'auto-effort', key: 'lastReply' } as const, nul
 const QUESTION = {
   type: 'score',
   instructions:
-    'How much reasoning effort does a coding agent need for `request`? A short follow-up ("yes", "do it", "1", "continue") approves or continues the work proposed in `last_reply` or asked for in `previous_request`. When `request` points at a file to read and do, `brief` is the start of that file: judge the work it describes.',
+    'How much reasoning effort does a coding agent need for `request`? A short follow-up ("yes", "do it", "1", "continue") approves or continues the work proposed in `last_reply` or asked for in `previous_request`. When `request` points at a file to read and do, `brief` is the start of that file: judge the work it describes. Judge the thinking the answer needs, not how short the request is: "check X and see what we need to change" asks for a decision, not a lookup.',
   criteria: [
-    'Trivial: a quick question, a lookup, or a one-line edit',
-    'Small: a focused change in one or two files',
-    'Moderate: a feature or bug fix across several files, a non-obvious bug, or running a multi-step workflow such as a code review',
-    'Hard: a cross-cutting refactor, tricky concurrency/security/performance work, debugging with little to go on, or a fix the user says still does not work',
+    'Trivial: a status check, a factual lookup, or a one-line edit, where the answer is just what was found',
+    'Small: a focused change in one or two files, or explaining one thing',
+    'Moderate: a feature or bug fix across several files, a non-obvious bug, or running a multi-step workflow such as a code review, or weighing feedback or a reviewer\'s claim (review, ticket or chat comments) against the current work',
+    'Hard: a cross-cutting refactor, tricky concurrency/security/performance work, debugging with little to go on, or a fix the user says still does not work, or re-planning a project after new requirements',
     'Very hard: architecture or algorithm design where a wrong call is expensive',
   ],
 }
