@@ -53,7 +53,7 @@ def main():
 
     prompts = {t.name: (t / 'prompt.txt').read_text().strip() for t in sorted((BENCH / 'tasks').iterdir()) if t.is_dir()}
     by_prompt = {v: k for k, v in prompts.items()}
-    decisions = [d for d in map(json.loads, LOG.read_text().splitlines()) if 'jev' in d and d.get('kind') != 'turn']
+    decisions = [d for d in map(json.loads, LOG.read_text().splitlines()) if 'jev' in d and d.get('kind') in (None, 'decision')]
 
     def sample(d):
         j = d['jev']

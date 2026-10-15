@@ -8,6 +8,10 @@ const TIMEOUT_MS = 3000
 const LOG_LINES = 1000
 const LOG_TRIM_BYTES = 2_000_000 // under fs.read's 4 MiB cap
 const REPORT_TURNS = 12
+// A turn still at low/medium after this many model requests is bigger than its prompt looked:
+// Jev is asked once more with what the agent has found, and may only raise the effort.
+const RECHECK_AT = 8
+const PROGRESS_CHARS = 6000
 // A fresh TLS connection to Jev costs ~550ms on top of its ~250ms answer, and an idle one is dropped within a few
 // minutes. So while the session is in use, an unauthenticated HEAD (a free 405) keeps the host's connection open.
 const WARM_EVERY_MS = 60_000
@@ -31,7 +35,7 @@ const lastReply = atom({ plugin: 'auto-effort', key: 'lastReply' } as const, nul
 const QUESTION = {
   type: 'score',
   instructions:
-    'How much reasoning effort does a coding agent need for `request`? A short follow-up ("yes", "do it", "1", "continue") approves or continues the work proposed in `last_reply` or asked for in `previous_request`. When `request` points at a file to read and do, `brief` is the start of that file: judge the work it describes. Judge the thinking the answer needs, not how short the request is: "check X and see what we need to change" asks for a decision, not a lookup.',
+    'How much reasoning effort does a coding agent need for `request`? A short follow-up ("yes", "do it", "1", "continue") approves or continues the work proposed in `last_reply` or asked for in `previous_request`. When `request` points at a file to read and do, `brief` is the start of that file: judge the work it describes. `progress`, when present, is what the agent has done and found so far in this turn: judge the work that remains. Judge the thinking the answer needs, not how short the request is: "check X and see what we need to change" asks for a decision, not a lookup.',
   criteria: [
     'Trivial: a status check, a factual lookup, or a one-line edit, where the answer is just what was found',
     'Small: a focused change in one or two files, or explaining one thing',
@@ -86,7 +90,7 @@ async function readBrief($: EngineInterface, text: string): Promise<string | nul
   return (await $.fs.read(full).catch(() => null))?.slice(0, 6000) ?? null
 }
 
-async function judge($: EngineInterface, text: string, before: string | null, reply: string | null): Promise<Judgement> {
+async function judge($: EngineInterface, text: string, before: string | null, reply: string | null, progress: string | null = null): Promise<Judgement> {
   const key = await $.env.get('TYPESAFE_API_KEY')
   if (!key) return { phase: 'kept', reason: 'no TYPESAFE_API_KEY' }
 
@@ -95,10 +99,10 @@ async function judge($: EngineInterface, text: string, before: string | null, re
   const res = await withTimeout($, TIMEOUT_MS, $.http.fetch(JEV_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    // ponytail: chars not tokens; 4k + 3k + 16k + 6k chars stays well under Jev's 32k-token state budget
+    // ponytail: chars not tokens; 4k + 3k + 16k + 6k + 6k chars stays well under Jev's 32k-token state budget
     body: JSON.stringify({
       model: 'jev-latest',
-      state: { previous_request: before?.slice(0, 4000) ?? null, last_reply: reply, request: text.slice(0, 16000), brief },
+      state: { previous_request: before?.slice(0, 4000) ?? null, last_reply: reply, request: text.slice(0, 16000), brief, progress },
       questions: { effort: QUESTION },
     }),
   }))
@@ -110,6 +114,17 @@ async function judge($: EngineInterface, text: string, before: string | null, re
   const pick = typeof score === 'number' && typeof confidence === 'number' ? LEVELS[Math.round(score)] : undefined
   if (!pick) return { phase: 'kept', reason: 'Jev gave no score' }
   return { phase: 'picked', pick, score, confidence, ms: (await $.clock.now()) - startedAt }
+}
+
+// The turn so far as text: the agent's words, its tool calls and what they returned. The end, where the findings are.
+// ponytail: the conversation's tail, not just this turn's; at RECHECK_AT requests the turn fills most of it
+async function progressOf($: EngineInterface): Promise<string> {
+  const lines = (await $.session.messages({ as: 'api' })).flatMap(m => m.content.map((b: any) =>
+    b.type === 'text' ? `${m.role}: ${b.text}`
+      : b.type === 'tool_use' ? `tool ${b.name} ${JSON.stringify(b.input).slice(0, 300)}`
+        : b.type === 'tool_result' ? `result: ${(typeof b.content === 'string' ? b.content : JSON.stringify(b.content)).slice(0, 1500)}`
+          : ''))
+  return lines.filter(Boolean).join('\n').slice(-PROGRESS_CHARS)
 }
 
 // One JSON line per judged prompt, for monitoring; outside the mod folder so writing it never reloads the mod.
@@ -152,6 +167,17 @@ export function report(logText: string): string {
     `${'ran at'.padEnd(14)}${'session'.padEnd(9)}${'reqs'.padStart(4)}${'out tok'.padStart(8)}  ${'jev'.padEnd(28)}prompt`,
     ...rows,
   ].join('\n')
+}
+
+// Asked by turn.step once a low/medium turn has made RECHECK_AT requests.
+async function recheck($: EngineInterface, turnId: string, was: Effort) {
+  const r = await read($, run)
+  if (r?.turnId !== turnId) return
+  const j = await judge($, r.prompt, null, null, await progressOf($))
+  // Raise only, and only the pick this turn still runs at: a newer prompt's pick is left alone.
+  const raised = j.phase === 'picked' && LEVELS.indexOf(j.pick) > LEVELS.indexOf(was) && (await read($, run))?.turnId === turnId
+  if (raised) await update($, judgement, cur => (cur?.phase === 'picked' && cur.pick === was ? { ...j, from: cur.from } : cur))
+  await log($, { kind: 'recheck', at: new Date(await $.clock.now()).toISOString(), prompt: r.prompt.slice(0, 120), was, raised, jev: j }).catch(() => {})
 }
 
 // The effort a pick runs at: capped at the session's own effort unless raising is allowed.
@@ -236,6 +262,11 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId || e.effort === undefined) return yield* next(e)
     if ((await read($, sessionEffort)) !== e.effort) await update($, sessionEffort, () => e.effort ?? null)
+    // Once per turn, before its request RECHECK_AT + 1: awaited (~0.5s), so that request already runs at a raise.
+    const was = (await read($, judgement))
+    if (e.index === RECHECK_AT && !(await off($)) && was?.phase === 'picked' && LEVELS.indexOf(was.pick) < LEVELS.indexOf('high')) {
+      await recheck($, e.turnId, was.pick).catch(() => {})
+    }
     const j = (await off($)) ? null : await read($, judgement)
     const pick = j?.phase === 'picked' ? j.pick : undefined
 
