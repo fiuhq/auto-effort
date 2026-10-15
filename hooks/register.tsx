@@ -264,7 +264,9 @@ export const register: Register = (on, options) => {
     if ((await read($, sessionEffort)) !== e.effort) await update($, sessionEffort, () => e.effort ?? null)
     // Once per turn, before its request RECHECK_AT + 1: awaited (~0.5s), so that request already runs at a raise.
     const was = (await read($, judgement))
-    if (e.index === RECHECK_AT && !(await off($)) && was?.phase === 'picked' && LEVELS.indexOf(was.pick) < LEVELS.indexOf('high')) {
+    // Skipped when a raise can't apply: already high, or already at the session's effort with raising off.
+    const room = (p: Effort) => LEVELS.indexOf(p) < LEVELS.indexOf('high') && (canRaise || LEVELS.indexOf(p) < LEVELS.indexOf(e.effort as Effort))
+    if (e.index === RECHECK_AT && !(await off($)) && was?.phase === 'picked' && room(was.pick)) {
       await recheck($, e.turnId, was.pick).catch(() => {})
     }
     const j = (await off($)) ? null : await read($, judgement)
