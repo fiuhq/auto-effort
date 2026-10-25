@@ -250,7 +250,7 @@ export const register: Register = (on, options) => {
   // A queued prompt's turn begins: its held pick (or none, for a slash command) becomes the running one.
   on('turn.start', async ($, e, next) => {
     // ponytail: one turn record at a time; assumes turn.start is the main thread's (its input has no agentId)
-    await update($, run, () => ({ turnId: e.turnId, prompt: e.text, requests: 0, efforts: [], outputTokens: 0 }))
+    await update($, run, () => ({ turnId: e.turnId, prompt: requestOf(e.text), requests: 0, efforts: [], outputTokens: 0 }))
     const q = await read($, queued)
     if (q && e.text.includes(q.text)) {
       await update($, queued, () => null)
