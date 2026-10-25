@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Effort, Judgement } from '../types'
+import { requestOf } from './paseo'
 
 const JEV_URL = 'https://api.typesafe.ai/v1/systemone'
 const TIMEOUT_MS = 3000
@@ -201,15 +202,16 @@ export const register: Register = (on, options) => {
     // pick waits too and turn.start applies it; otherwise it's an aside delivered into the running task.
     const waits = Boolean(e.turnId && e.wait)
     const isAside = Boolean(e.turnId) && !waits
-    const isCommand = e.text.trim().startsWith('/')
+    const text = requestOf(e.text)
+    const isCommand = text.trim().startsWith('/')
     const before = await read($, previous)
     // The task a later "yes"/"continue" refers to: kept while off too; not a slash command, and not an aside
     // sent mid-task, so "continue" after an interrupt is judged against the task, not the aside.
-    if (!isCommand && !e.turnId) await update($, previous, () => e.text)
+    if (!isCommand && !e.turnId) await update($, previous, () => text)
 
     if (isCommand || (await off($))) {
       // Not judged: its turn runs at the session's effort, not the last task's pick.
-      if (waits) await update($, queued, () => ({ text: e.text, judgement: null }))
+      if (waits) await update($, queued, () => ({ text, judgement: null }))
       else if (!isAside) await update($, judgement, () => null)
       return next(e)
     }
@@ -219,21 +221,21 @@ export const register: Register = (on, options) => {
     if (!e.turnId) {
       await update($, judgement, () => ({ phase: 'asking' }))
     }
-    const judged = await judge($, e.text, before, await read($, lastReply)).catch((): Judgement => ({ phase: 'kept', reason: 'Jev unreachable' }))
+    const judged = await judge($, text, before, await read($, lastReply)).catch((): Judgement => ({ phase: 'kept', reason: 'Jev unreachable' }))
     // An aside can only raise a running pick. With none running the turn is at the session's effort,
     // which we can't compare against, so the aside leaves it alone.
     let j: Judgement | null = judged
     if (isAside && (current?.phase !== 'picked' || j.phase !== 'picked' || LEVELS.indexOf(j.pick) < LEVELS.indexOf(current.pick))) {
       j = current
     }
-    if (waits) await update($, queued, () => ({ text: e.text, judgement: judged }))
+    if (waits) await update($, queued, () => ({ text, judgement: judged }))
     else await update($, judgement, () => j)
     await log($, {
       kind: 'decision',
       at: new Date(await $.clock.now()).toISOString(),
       midTurn: isAside,
       queued: waits,
-      prompt: e.text.slice(0, 120),
+      prompt: text.slice(0, 120),
       jev: judged,
       applies: waits ? 'at its own turn' : j?.phase === 'picked' ? applied(j.pick, await read($, sessionEffort), canRaise) : 'session',
     }).catch(() => {})
